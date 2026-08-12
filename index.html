@@ -6,6 +6,7 @@
 <title>Ledger — Scholarship Finder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/supabase/2.45.4/supabase.min.js"></script>
 <style>
   :root{
     --paper:#FAF7EF;
@@ -286,6 +287,7 @@
     <div class="modes">
       <button class="active" data-mode="match" id="modeMatchBtn">Match me</button>
       <button data-mode="browse" id="modeBrowseBtn">Browse all</button>
+      <button data-mode="admin" id="modeAdminBtn" style="margin-left:auto;">+ Add scholarship</button>
     </div>
 
     <div class="profile-box" id="matchPanel">
@@ -345,6 +347,32 @@
       <button class="run-btn" id="runBrowse">Apply filters</button>
     </div>
 
+    <div class="profile-box" id="adminPanel" style="display:none;">
+      <label>Add a scholarship to the live database</label>
+      <div class="filter-grid" style="grid-template-columns:1fr;">
+        <div class="field"><input type="text" id="a_name" placeholder="Scholarship name"></div>
+        <div class="field"><textarea id="a_desc" placeholder="Short description" style="min-height:60px;"></textarea></div>
+      </div>
+      <div class="filter-grid">
+        <div class="field"><label>Amount min</label><input type="number" id="a_amin" placeholder="1000"></div>
+        <div class="field"><label>Amount max</label><input type="number" id="a_amax" placeholder="5000"></div>
+        <div class="field"><label>Deadline</label><input type="date" id="a_deadline"></div>
+        <div class="field"><label>Scope</label>
+          <select id="a_scope">
+            <option value="national">National</option>
+            <option value="state">State</option>
+            <option value="international">International</option>
+          </select>
+        </div>
+        <div class="field"><label>State (if scope=state)</label><input type="text" id="a_state" placeholder="TX"></div>
+        <div class="field"><label>Min GPA</label><input type="number" step="0.1" id="a_gpa" placeholder="3.0"></div>
+        <div class="field"><label>Majors (comma-separated, or "any")</label><input type="text" id="a_majors" placeholder="any"></div>
+        <div class="field"><label>Application URL</label><input type="text" id="a_url" placeholder="https://..."></div>
+      </div>
+      <button class="run-btn" id="submitScholarship">Save to database</button>
+      <p id="adminStatus" style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:10px;"></p>
+    </div>
+
     <p class="count-line" id="countLine"></p>
     <div id="results"></div>
   </section>
@@ -355,7 +383,32 @@
 </div>
 
 <script>
-// ---- Sample dataset (stand-in for the Supabase `scholarships` table) ----
+// ---- Supabase connection ----
+const SUPABASE_URL = "https://atppxwemihizteogcuud.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0cHB4d2VtaWhpenRlb2djdXVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzNDk5ODcsImV4cCI6MjEwMDkyNTk4N30.ybIkbng_hoYiiJcwC2qemm6JIvPq3TCfzjCxIekq4Ws";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let LIVE_DATA = [];  // populated from Supabase on load; falls back to SAMPLE if the fetch fails
+
+async function loadScholarships(){
+  try{
+    const { data, error } = await sb.from('scholarships').select('*').order('deadline', { ascending: true });
+    if(error) throw error;
+    if(data && data.length){
+      LIVE_DATA = data;
+      return data;
+    }
+    // table exists but is empty — fall back to sample so the demo isn't blank
+    LIVE_DATA = SAMPLE;
+    return SAMPLE;
+  }catch(err){
+    console.warn("Supabase fetch failed, using sample data:", err.message);
+    LIVE_DATA = SAMPLE;
+    return SAMPLE;
+  }
+}
+
+// ---- Sample dataset (offline fallback only — real data lives in Supabase) ----
 const SAMPLE = [
   {name:"Terry Foundation Scholarship", amount_min:6000, amount_max:6000, deadline:"2027-02-01", scope:"state", eligible_states:["TX"], min_gpa:3.0, majors:["any"], education_level:["undergrad"], need_based:true, essay_required:true, demographic_tags:[], description:"Renewable award for Texas residents attending a partner Texas public university.", application_url:"#"},
   {name:"UNCF/Denny's Hungry for Education", amount_min:1000, amount_max:10000, deadline:"2027-01-15", scope:"national", eligible_states:[], min_gpa:2.5, majors:["any"], education_level:["undergrad"], need_based:true, essay_required:true, demographic_tags:["underrepresented_minority"], description:"National award supporting students from underrepresented backgrounds pursuing any major.", application_url:"#"},
@@ -383,14 +436,17 @@ function populateStateSelects(){
 populateStateSelects();
 
 function fmtDeadline(d){
+  if(!d) return "Rolling / no fixed date";
   const date = new Date(d + "T00:00:00");
   return date.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
 }
 function isSoon(d){
+  if(!d) return false;
   const diff = (new Date(d) - new Date());
   return diff > 0 && diff < 1000*60*60*24*45; // within 45 days
 }
 function fmtAmount(min,max){
+  min = min || 0; max = max || 0;
   if(min===max) return "$"+min.toLocaleString();
   return "$"+min.toLocaleString()+" – $"+max.toLocaleString();
 }
@@ -410,7 +466,7 @@ function renderResults(list){
         <div class="meta">
           <span>${s.scope.toUpperCase()}${s.eligible_states && s.eligible_states.length ? " · "+s.eligible_states.join(", ") : ""}</span>
           <span class="${isSoon(s.deadline)?'deadline-soon':''}">Due ${fmtDeadline(s.deadline)}</span>
-          <span>Min GPA ${s.min_gpa}</span>
+          ${s.min_gpa ? `<span>Min GPA ${s.min_gpa}</span>` : ''}
         </div>
         <p class="desc">${s.description}</p>
         <a class="apply" href="${s.application_url}">View details →</a>
@@ -442,11 +498,13 @@ function runMatch(){
   const major = (document.getElementById("major").value || parsed.major || "").toLowerCase();
   const level = document.getElementById("level").value;
 
-  const filtered = SAMPLE.filter(s=>{
+  const filtered = LIVE_DATA.filter(s=>{
+    const majors = s.majors || [];
+    const educationLevel = s.education_level || [];
     if(gpa && s.min_gpa && gpa < s.min_gpa) return false;
     if(state && s.scope==="state" && !(s.eligible_states||[]).includes(state)) return false;
-    if(major && !s.majors.includes("any") && !s.majors.some(m=>m.toLowerCase().includes(major))) return false;
-    if(level && !s.education_level.includes(level)) return false;
+    if(major && !majors.includes("any") && !majors.some(m=>m.toLowerCase().includes(major))) return false;
+    if(level && !educationLevel.includes(level)) return false;
     return true;
   });
   renderResults(filtered);
@@ -458,7 +516,7 @@ function runBrowse(){
   const minAmount = parseFloat(document.getElementById("amountFilter").value) || 0;
   const deadlineBefore = document.getElementById("deadlineFilter").value;
 
-  const filtered = SAMPLE.filter(s=>{
+  const filtered = LIVE_DATA.filter(s=>{
     if(scope && s.scope!==scope) return false;
     if(state && s.scope==="state" && !(s.eligible_states||[]).includes(state)) return false;
     if(minAmount && s.amount_max < minAmount) return false;
@@ -468,28 +526,73 @@ function runBrowse(){
   renderResults(filtered);
 }
 
+async function submitScholarship(){
+  const status = document.getElementById("adminStatus");
+  const majorsRaw = document.getElementById("a_majors").value.trim();
+  const majors = majorsRaw ? majorsRaw.split(",").map(m=>m.trim()) : ["any"];
+  const stateRaw = document.getElementById("a_state").value.trim().toUpperCase();
+  const scope = document.getElementById("a_scope").value;
+
+  const row = {
+    name: document.getElementById("a_name").value.trim(),
+    description: document.getElementById("a_desc").value.trim(),
+    amount_min: parseInt(document.getElementById("a_amin").value) || 0,
+    amount_max: parseInt(document.getElementById("a_amax").value) || 0,
+    deadline: document.getElementById("a_deadline").value || null,
+    scope: scope,
+    eligible_states: scope === "state" && stateRaw ? [stateRaw] : [],
+    min_gpa: parseFloat(document.getElementById("a_gpa").value) || null,
+    majors: majors,
+    education_level: ["undergrad"],
+    application_url: document.getElementById("a_url").value.trim(),
+  };
+
+  if(!row.name){
+    status.textContent = "Name is required.";
+    status.style.color = "var(--coral)";
+    return;
+  }
+
+  status.textContent = "Saving…";
+  status.style.color = "#7a7362";
+
+  const { error } = await sb.from('scholarships').insert(row);
+  if(error){
+    status.textContent = "Error: " + error.message;
+    status.style.color = "var(--coral)";
+    return;
+  }
+  status.textContent = "Saved. It'll show up in Browse all.";
+  status.style.color = "var(--ledger)";
+  ["a_name","a_desc","a_amin","a_amax","a_deadline","a_state","a_gpa","a_majors","a_url"].forEach(id=>{
+    document.getElementById(id).value = "";
+  });
+  await loadScholarships();
+}
+
 document.getElementById("runMatch").addEventListener("click", runMatch);
 document.getElementById("runBrowse").addEventListener("click", runBrowse);
 
-document.getElementById("modeMatchBtn").addEventListener("click", ()=>{
-  document.getElementById("modeMatchBtn").classList.add("active");
-  document.getElementById("modeBrowseBtn").classList.remove("active");
-  document.getElementById("matchPanel").style.display = "block";
-  document.getElementById("browsePanel").style.display = "none";
-  document.getElementById("results").innerHTML = "";
-  document.getElementById("countLine").textContent = "";
-});
-document.getElementById("modeBrowseBtn").addEventListener("click", ()=>{
-  document.getElementById("modeBrowseBtn").classList.add("active");
-  document.getElementById("modeMatchBtn").classList.remove("active");
-  document.getElementById("browsePanel").style.display = "block";
-  document.getElementById("matchPanel").style.display = "none";
-  document.getElementById("results").innerHTML = "";
-  document.getElementById("countLine").textContent = "";
-});
+document.getElementById("submitScholarship").addEventListener("click", submitScholarship);
 
-// show everything on load, in browse-like default
-renderResults(SAMPLE);
+function setMode(mode){
+  document.getElementById("modeMatchBtn").classList.toggle("active", mode==="match");
+  document.getElementById("modeBrowseBtn").classList.toggle("active", mode==="browse");
+  document.getElementById("matchPanel").style.display = mode==="match" ? "block" : "none";
+  document.getElementById("browsePanel").style.display = mode==="browse" ? "block" : "none";
+  document.getElementById("adminPanel").style.display = mode==="admin" ? "block" : "none";
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("countLine").textContent = "";
+}
+document.getElementById("modeMatchBtn").addEventListener("click", ()=>setMode("match"));
+document.getElementById("modeBrowseBtn").addEventListener("click", ()=>setMode("browse"));
+document.getElementById("modeAdminBtn").addEventListener("click", ()=>setMode("admin"));
+
+// load real data from Supabase on start, then show it in Browse-all style
+(async function init(){
+  const data = await loadScholarships();
+  renderResults(data);
+})();
 </script>
 
 </body>
