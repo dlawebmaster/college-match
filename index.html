@@ -314,6 +314,25 @@
             <option value="high_school">High school</option>
             <option value="undergrad">Undergrad</option>
             <option value="grad">Grad</option>
+            <option value="associate">Associate</option>
+            <option value="vocational">Vocational</option>
+            <option value="professional">Professional development</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="keyword">Award name / keyword</label>
+          <input type="text" id="keyword" placeholder="e.g. engineering, Terry Foundation">
+        </div>
+        <div class="field">
+          <label for="awardType">Award type</label>
+          <select id="awardType">
+            <option value="">Any</option>
+            <option value="Scholarship">Scholarship</option>
+            <option value="Fellowship">Fellowship</option>
+            <option value="Grant">Grant</option>
+            <option value="Prize">Prize</option>
+            <option value="Public Grant">Public Grant</option>
+            <option value="Loan">Loan</option>
           </select>
         </div>
       </div>
@@ -322,6 +341,10 @@
 
     <div class="profile-box" id="browsePanel" style="display:none;">
       <div class="filter-grid" style="margin-top:0;">
+        <div class="field">
+          <label for="keywordFilter">Award name / keyword</label>
+          <input type="text" id="keywordFilter" placeholder="e.g. nursing, Kappa">
+        </div>
         <div class="field">
           <label for="scopeFilter">Scope</label>
           <select id="scopeFilter">
@@ -334,6 +357,30 @@
         <div class="field">
           <label for="stateFilter">State</label>
           <select id="stateFilter"></select>
+        </div>
+        <div class="field">
+          <label for="levelFilter">Level of study</label>
+          <select id="levelFilter">
+            <option value="">Any</option>
+            <option value="high_school">High school</option>
+            <option value="undergrad">Undergrad</option>
+            <option value="grad">Grad</option>
+            <option value="associate">Associate</option>
+            <option value="vocational">Vocational</option>
+            <option value="professional">Professional development</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="awardTypeFilter">Award type</label>
+          <select id="awardTypeFilter">
+            <option value="">Any</option>
+            <option value="Scholarship">Scholarship</option>
+            <option value="Fellowship">Fellowship</option>
+            <option value="Grant">Grant</option>
+            <option value="Prize">Prize</option>
+            <option value="Public Grant">Public Grant</option>
+            <option value="Loan">Loan</option>
+          </select>
         </div>
         <div class="field">
           <label for="amountFilter">Min amount</label>
@@ -465,6 +512,7 @@ function renderResults(list){
         <h3>${s.name}</h3>
         <div class="meta">
           <span>${s.scope.toUpperCase()}${s.eligible_states && s.eligible_states.length ? " · "+s.eligible_states.join(", ") : ""}</span>
+          ${s.award_type && s.award_type.length ? `<span>${s.award_type.join(" / ")}</span>` : ''}
           <span class="${isSoon(s.deadline)?'deadline-soon':''}">Due ${fmtDeadline(s.deadline)}</span>
           ${s.min_gpa ? `<span>Min GPA ${s.min_gpa}</span>` : ''}
         </div>
@@ -497,14 +545,22 @@ function runMatch(){
   const state = document.getElementById("state").value || parsed.state || "";
   const major = (document.getElementById("major").value || parsed.major || "").toLowerCase();
   const level = document.getElementById("level").value;
+  const keyword = document.getElementById("keyword").value.trim().toLowerCase();
+  const awardType = document.getElementById("awardType").value;
 
   const filtered = LIVE_DATA.filter(s=>{
     const majors = s.majors || [];
     const educationLevel = s.education_level || [];
+    const awardTypes = s.award_type || [];
     if(gpa && s.min_gpa && gpa < s.min_gpa) return false;
     if(state && s.scope==="state" && !(s.eligible_states||[]).includes(state)) return false;
     if(major && !majors.includes("any") && !majors.some(m=>m.toLowerCase().includes(major))) return false;
     if(level && !educationLevel.includes(level)) return false;
+    if(awardType && !awardTypes.includes(awardType)) return false;
+    if(keyword){
+      const haystack = ((s.name||"") + " " + (s.description||"")).toLowerCase();
+      if(!haystack.includes(keyword)) return false;
+    }
     return true;
   });
   renderResults(filtered);
@@ -513,14 +569,25 @@ function runMatch(){
 function runBrowse(){
   const scope = document.getElementById("scopeFilter").value;
   const state = document.getElementById("stateFilter").value;
+  const level = document.getElementById("levelFilter").value;
+  const awardType = document.getElementById("awardTypeFilter").value;
   const minAmount = parseFloat(document.getElementById("amountFilter").value) || 0;
   const deadlineBefore = document.getElementById("deadlineFilter").value;
+  const keyword = document.getElementById("keywordFilter").value.trim().toLowerCase();
 
   const filtered = LIVE_DATA.filter(s=>{
+    const educationLevel = s.education_level || [];
+    const awardTypes = s.award_type || [];
     if(scope && s.scope!==scope) return false;
     if(state && s.scope==="state" && !(s.eligible_states||[]).includes(state)) return false;
-    if(minAmount && s.amount_max < minAmount) return false;
-    if(deadlineBefore && new Date(s.deadline) > new Date(deadlineBefore)) return false;
+    if(level && !educationLevel.includes(level)) return false;
+    if(awardType && !awardTypes.includes(awardType)) return false;
+    if(minAmount && (s.amount_max||0) < minAmount) return false;
+    if(deadlineBefore && s.deadline && new Date(s.deadline) > new Date(deadlineBefore)) return false;
+    if(keyword){
+      const haystack = ((s.name||"") + " " + (s.description||"")).toLowerCase();
+      if(!haystack.includes(keyword)) return false;
+    }
     return true;
   });
   renderResults(filtered);
